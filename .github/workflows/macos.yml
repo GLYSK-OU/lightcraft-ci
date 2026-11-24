@@ -1,0 +1,86 @@
+name: macOS build
+
+# Builds a branch of GLYSK-OU/lightcraft on a GitHub macOS (Apple Silicon) runner:
+# runs the tests of the chosen packages, then packages an ad-hoc-signed LightCraft.app
+# (packaging/macos/package.sh) and uploads the DMG and CLI zip as artifacts.
+# Upstream CI runs on Linux only, so macOS-only code (e.g. crates/engine/src/apple_photos.rs)
+# is compiled and tested here.
+#
+# Run: gh workflow run macos.yml -R GLYSK-OU/lightcraft-ci -f ref=feat/my-branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA of GLYSK-OU/lightcraft
+        required: true
+        default: main
+      packages:
+        description: Cargo packages to test (space separated, empty = skip tests)
+        required: false
+        default: lightcraft-engine
+      package_app:
+        description: Build the ad-hoc-signed LightCraft.app
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: lightcraft
+    steps:
+      - name: Check out GLYSK-OU/lightcraft
+        uses: actions/checkout@v4
+        with:
+          repository: GLYSK-OU/lightcraft
+          ref: ${{ inputs.ref }}
+          path: lightcraft
+          fetch-depth: 1
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          rustc --version
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lightcraft
+          shared-key: macos-arm64
+
+      - name: Clippy and tests
+        if: inputs.packages != ''
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          args=()
+          for p in $PACKAGES; do
+            [[ "$p" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad package name: $p" >&2; exit 2; }
+            args+=(-p "$p")
+          done
+          cargo clippy --locked "${args[@]}" --all-targets -- -D warnings
+          cargo test --locked "${args[@]}"
+
+      - name: Package LightCraft.app (ad-hoc signed)
+        if: inputs.package_app
+        run: packaging/macos/package.sh --arch aarch64
+
+      - name: Upload app
+        if: inputs.package_app
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightcraft-macos-aarch64-${{ github.run_number }}
+          path: lightcraft/dist/release/*
+          retention-days: 7
+          if-no-files-found: error
