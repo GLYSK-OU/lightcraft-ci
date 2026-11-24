@@ -26,8 +26,8 @@ on:
       runner:
         description: macOS runner (Apple Silicon except macos-15-intel)
         type: choice
-        options: [macos-15, macos-26, macos-latest, macos-15-intel]
-        default: macos-15
+        options: [macos-26, macos-15, macos-latest, macos-15-intel]
+        default: macos-26
 
 permissions:
   contents: read
